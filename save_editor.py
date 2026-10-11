@@ -812,6 +812,52 @@ def unlock_all_roles(userdata_dir):
     return newly
 
 
+def _game_proc_match(name):
+    """判断进程名是否属于游戏本体（排除修改器自身/解释器）"""
+    if not name:
+        return False
+    if any(k in name for k in ('修改器', 'trainer', 'modifier', 'python', 'pyinstaller')):
+        return False
+    return any(k in name for k in ('纵横三界', '造梦西游', 'zongheng', 'ZHXYS', 'zhuzao'))
+
+
+def game_process_running():
+    """检测游戏主程序是否正在运行（进程名含 纵横三界/造梦西游/zongheng 等）
+    注：游戏只在启动时读取 unlock_data.json，运行中写入不生效，需重启游戏"""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.windll.kernel32
+        TH32CS_SNAPPROCESS = 2
+        MAX_PATH = 260
+
+        class PROCESSENTRY32W(ctypes.Structure):
+            _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
+                        ("th32ProcessID", wintypes.DWORD),
+                        ("th32DefaultHeapID", ctypes.c_void_p),
+                        ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
+                        ("th32ParentProcessID", wintypes.DWORD),
+                        ("pcPriClassBase", ctypes.c_long), ("dwFlags", wintypes.DWORD),
+                        ("szExeFile", ctypes.c_wchar * MAX_PATH)]
+
+        snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+        if snapshot in (-1, 0):
+            return False
+        try:
+            entry = PROCESSENTRY32W()
+            entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+            ok = kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
+            while ok:
+                if _game_proc_match(entry.szExeFile):
+                    return True
+                ok = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
+        finally:
+            kernel32.CloseHandle(snapshot)
+    except Exception:
+        pass
+    return False
+
+
 # ================= GUI =================
 def main():
     try:
@@ -1483,11 +1529,23 @@ def main():
         newly = unlock_all_roles(ud)
         data = read_unlock_data(ud)
         unlocked = get_unlocked_display_names(data)
+        running = game_process_running()
         if newly:
-            messagebox.showinfo('解锁成功', '已解锁角色：' + '、'.join(newly) +
-                                '\n\n重新进入游戏的「角色选择」界面即可选用。')
+            if running:
+                messagebox.showinfo('已写入解锁数据',
+                                    '已解锁角色：' + '、'.join(newly) +
+                                    '\n\n⚠ 检测到游戏正在运行：\n游戏只在启动时读取解锁数据，' +
+                                    '请【完全退出游戏】后重新打开，\n再进入「角色选择」界面即可选用全部角色。')
+            else:
+                messagebox.showinfo('解锁成功', '已解锁角色：' + '、'.join(newly) +
+                                    '\n\n启动游戏后进入「角色选择」界面即可选用。')
         else:
-            messagebox.showinfo('解锁成功', '所有角色都已解锁：\n' + '、'.join(unlocked))
+            if running:
+                messagebox.showinfo('已写入解锁数据', '所有角色都已解锁：\n' + '、'.join(unlocked) +
+                                    '\n\n⚠ 检测到游戏正在运行：请【完全退出游戏】后重新打开，' +
+                                    '再进入「角色选择」界面即可生效。')
+            else:
+                messagebox.showinfo('解锁成功', '所有角色都已解锁：\n' + '、'.join(unlocked))
         status.set('角色解锁：' + ('、'.join(unlocked) if unlocked else '（无）'))
 
     # 初始
