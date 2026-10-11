@@ -126,6 +126,10 @@
 
 * 直接改等级、金币、灵魂、HP/MP、攻击等字段，点 **保存**；
 
+* **「等级(角色)」** 即游戏角色等级，保存时自动同步写入 `player_stats.level`（游戏实际读取的字段）与存档冗余字段，改完进游戏即可生效；
+
+* 载入存档后「背包」列表直接显示背包内真实道具（id / 名字 / 数量），选中行改数量即改背包内数量（写入条目 `item_data` 字段，与游戏结构一致）；
+
 * 保存时自动重算 `guard` 校验码，游戏可正常读取。
 
 ### 3. 一键解锁所有角色
@@ -216,9 +220,13 @@ python test_unlock.py            # 一键解锁所有角色（写盘/幂等/容�
 python test_equip.py             # 装备添加/穿戴（Godot 引擎验证，需自备引擎）
 python test_editor_logic.py      # 存档编辑器核心（guard/存档码/写档往返）
 python test_editor_v2.py         # 存档编辑器 v2（合规/装备/背包）
+python test_real_save.py         # 真实存档结构回归（等级/背包 item_data/guard 重算）
 ```
 
-最近一次全量结果（2026-10-11）：`CORE ✓ LOGIC ✓ EQUIP ✓ EDITOR_LOGIC ✓ EDITOR_V2 ✓ GOD_E2E ✓ SIMPLE_E2E ✓ UNLOCK ✓`（角色解锁另有 Godot 4.5.2 引擎 golden 验证：写入文件 → 游戏原版 UnlockSystem 判定全部角色解锁）
+最近一次全量结果（2026-10-11，v1.2.0）：`CORE ✓ LOGIC ✓ EQUIP ✓ EDITOR_LOGIC ✓ EDITOR_V2 ✓ REAL_SAVE(21项) ✓ GOD_E2E ✓ SIMPLE_E2E ✓ UNLOCK ✓`
+额外验证：
+* **Godot 4.5.2 引擎 golden**：修改器写出的修改版存档（等级 30 / 新手宝箱×66 / 新增如意金箍棒）由游戏引擎读回，guard 四项全部 MATCH、`player_stats.level` 生效、背包条目完整可读；
+* **真实存档 GUI 冒烟**：载入真实槽位 1，背包列表正确显示全部 10 件道具（新手宝箱/行者棍/长袍/行者服…），主属性「等级(角色)」正确显示 `player_stats.level`。
 
 
 

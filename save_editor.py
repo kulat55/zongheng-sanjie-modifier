@@ -206,7 +206,7 @@ def slot_preview(data):
     if isinstance(re, dict):
         role = str(re.get('current_role', ''))
     return {
-        'level': cd.get('level', 1) if isinstance(cd, dict) else 1,
+        'level': stats.get('level', cd.get('level', 1)) if isinstance(stats, dict) else cd.get('level', 1),
         'soul': cd.get('soul_count', 0) if isinstance(cd, dict) else 0,
         'gold': cd.get('gold', 0) if isinstance(cd, dict) else 0,
         'role': role,
@@ -231,7 +231,7 @@ def write_save(path, data):
 
 # 主编辑字段
 MAIN_FIELDS = [
-    ('level', '等级', 1, 80),
+    ('level', '等级(角色)', 1, 80),
     ('experience', '经验', 0, 999999999),
     ('gold', '金币', 0, 10 ** 13),
     ('soul_count', '灵魂', 0, 10 ** 13),
@@ -242,6 +242,9 @@ MAIN_FIELDS = [
     ('wushuang_energy', '怒气值', 0, 10 ** 13),
     ('unlocked_level_demon', '已解锁恶魔关卡', 1, 999),
 ]
+
+# 主属性字段 → 需要同步写入的 player_stats 字段（游戏角色等级读 player_stats.level）
+MAIN_STAT_SYNC = {'level': 'level'}
 
 STAT_FIELDS = [
     ('level', '等级', 1, 80), ('Hp', '生命', -1e15, 2e7), ('max_Hp', '生命上限', -1e15, 2e7),
@@ -268,9 +271,13 @@ def check_save_compliance(data):
     cd = data.get('character_data', {})
     if not isinstance(cd, dict):
         return ['character_data 缺失']
-    lv = int(cd.get('level', 1))
-    if lv < 1 or lv > SAVE_LIMITS['level']:
-        out.append('等级=%d（允许 1-%d）' % (lv, SAVE_LIMITS['level']))
+    # 角色等级（游戏 get_level 读 player_stats.level；cd.level 为存档冗余等级，均需合规）
+    st_lv = cd.get('player_stats', {})
+    lv_ps = st_lv.get('level', 1) if isinstance(st_lv, dict) else 1
+    lv_cd = cd.get('level', lv_ps)
+    for nm, lv in (('角色等级', lv_ps), ('存档等级', lv_cd)):
+        if isinstance(lv, (int, float)) and (lv < 1 or lv > SAVE_LIMITS['level']):
+            out.append('%s=%s（允许 1-%d）' % (nm, lv, SAVE_LIMITS['level']))
     soul = int(cd.get('soul_count', 0))
     if soul < 0 or soul > SAVE_LIMITS['soul']:
         out.append('灵魂=%d（允许 0-%d）' % (soul, SAVE_LIMITS['soul']))
@@ -296,16 +303,17 @@ def check_save_compliance(data):
                 v = st[key]
                 if isinstance(v, (int, float)) and (v < 0 or v > cap):
                     out.append('%s%s=%s（允许 0-%d）' % (tag, key, v, cap))
-    # 道具堆叠（遍历背包）
+    # 道具堆叠（遍历背包，数量在 item_data 内）
     for pkey in ('backpack_items', 'backpack_items_2p'):
         items = cd.get(pkey, [])
         if not isinstance(items, list):
             continue
         for it in items:
-            if isinstance(it, dict) and '数量' in it:
-                n = it['数量']
-                if isinstance(n, (int, float)) and (n < 0 or n > SAVE_LIMITS['stack']):
-                    out.append('道具 %s 数量=%s（允许 0-%d）' % (it.get('id', '?'), n, SAVE_LIMITS['stack']))
+            if not isinstance(it, dict):
+                continue
+            iid, _, n = bag_entry_fields(it)
+            if isinstance(n, (int, float)) and (n < 0 or n > SAVE_LIMITS['stack']):
+                out.append('道具 %s 数量=%s（允许 0-%d）' % (iid, n, SAVE_LIMITS['stack']))
     return out
 
 
@@ -539,6 +547,32 @@ def get_item_category(item_type):
 def is_item_stackable(item_type):
     """复刻 Global.is_item_stackable"""
     return item_type not in NON_STACKABLE_TYPES
+
+
+def bag_entry_fields(item):
+    """从背包条目提取 (id, 名字, 数量)。
+    真实存档结构：{"category":.., "item_data":{id/名字/数量/...}, "page":.., "slot_index":..}
+    兼容旧版顶层字段结构"""
+    if not isinstance(item, dict):
+        return ('?', '', 1)
+    idata = item.get('item_data')
+    if isinstance(idata, dict):
+        return (str(idata.get('id', '?')), str(idata.get('名字', '') or ''), idata.get('数量', 1))
+    return (str(item.get('id', '?')), str(item.get('名字', '') or ''), item.get('数量', 1))
+
+
+def set_bag_amount(item, n):
+    """设置背包条目数量（优先 item_data，兼容顶层旧格式）。返回是否成功"""
+    if not isinstance(item, dict):
+        return False
+    idata = item.get('item_data')
+    if isinstance(idata, dict):
+        idata['数量'] = n
+        return True
+    if 'id' in item or '数量' in item:
+        item['数量'] = n
+        return True
+    return False
 
 
 def find_empty_slot(backpack_items, category):
@@ -1011,11 +1045,14 @@ def main():
         cd = data.get('character_data', {})
         if not isinstance(cd, dict):
             cd = {}
-        for k, v in main_vars.items():
-            main_vars[k].set(str(cd.get(k, '')))
         stats = cd.get('player_stats', {})
         if not isinstance(stats, dict):
             stats = {}
+        for k, v in main_vars.items():
+            if k in MAIN_STAT_SYNC and MAIN_STAT_SYNC[k] in stats:
+                main_vars[k].set(str(stats.get(MAIN_STAT_SYNC[k], '')))
+            else:
+                main_vars[k].set(str(cd.get(k, '')))
         for k, v in stat_vars.items():
             stat_vars[k].set(str(stats.get(k, '')))
         stats2 = cd.get('player_stats_2p', {})
@@ -1028,9 +1065,7 @@ def main():
         for item in (cd.get('backpack_items', []) if isinstance(cd.get('backpack_items'), list) else []):
             if not isinstance(item, dict):
                 continue
-            iid = str(item.get('id', '?'))
-            name = item.get('名字', '') or ''
-            amt = item.get('数量', 1)
+            iid, name, amt = bag_entry_fields(item)
             bag_tree.insert('', 'end', iid=iid + '|' + str(len(bag_tree.get_children())), values=(iid, name, amt))
         status.set('已载入槽位 %d: %s' % (slot, os.path.basename(path)))
 
@@ -1055,9 +1090,12 @@ def main():
         cd = current_data[0].get('character_data', {})
         changed = 0
         for item in cd.get('backpack_items', []):
-            if isinstance(item, dict) and str(item.get('id', '')) == id_part:
-                item['数量'] = n
-                changed += 1
+            if not isinstance(item, dict):
+                continue
+            item_id, _, _ = bag_entry_fields(item)
+            if str(item_id) == id_part:
+                if set_bag_amount(item, n):
+                    changed += 1
         status.set('已更新 %d 个同名道具的数量' % changed)
         _refresh_bag_tree(current_data[0])
 
@@ -1068,9 +1106,9 @@ def main():
         for item in items:
             if not isinstance(item, dict):
                 continue
-            iid = str(item.get('id', '?'))
+            iid, name, amt = bag_entry_fields(item)
             bag_tree.insert('', 'end', iid=iid + '|' + str(len(bag_tree.get_children())),
-                            values=(iid, item.get('名字', ''), item.get('数量', 1)))
+                            values=(iid, name, amt))
 
     def _collect_from_vars():
         if not current_data[0]:
@@ -1085,6 +1123,13 @@ def main():
                 except ValueError:
                     messagebox.showwarning('提示', '主属性 %s 数值无效' % k)
                     return None
+                # 等级等字段同步到 player_stats（游戏角色等级读 player_stats.level）
+                if k in MAIN_STAT_SYNC:
+                    stats_sync = cd.get('player_stats')
+                    if not isinstance(stats_sync, dict):
+                        stats_sync = {}
+                        cd['player_stats'] = stats_sync
+                    stats_sync[MAIN_STAT_SYNC[k]] = int(float(s))
         for pkey, varmap in (('player_stats', stat_vars), ('player_stats_2p', stat2_vars)):
             stats = cd.get(pkey)
             if not isinstance(stats, dict):
