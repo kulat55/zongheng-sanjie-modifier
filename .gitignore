@@ -1,0 +1,29 @@
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# PyInstaller 构建产物
+build/
+dist/
+*.spec
+
+# 存档备份
+*.bak
+
+# 引擎/逆向中间产物（不入库）
+Godot_v4.5.2-stable_win64_console.exe
+found_key.*
+*.pck
+game_unpacked_v0675/
+decompiled/
+pck_index_v0675.json
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 测试输出
+out_*.txt
+ALL_RESULTS.txt
