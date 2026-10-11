@@ -718,6 +718,100 @@ def equip_item_to_role(data, role_id, item_id, player=1):
     return True, '已穿上：%s → %s（槽位：%s）' % (entry.get('名字', item_id), ROLE_ID_MAP[role_id], SLOT_NAMES.get(target, str(target)))
 
 
+# ================= 角色解锁系统（复刻 UnlockSystem.gd / UnlockConfig.gd） =================
+# 解锁数据存 user://unlock_data.json（游戏用户数据目录下，与 saves 同级）：
+#   {"unlocks": {unlock_key: bool}, "announced_roles": [role_id, ...]}
+# 默认解锁：孙悟空(wu_kong)、唐僧(tang_seng)；其余角色需解锁。
+# 玉兔·二形态(yu_tu2) 跟随玉兔，无独立 key。
+ROLE_UNLOCK_TABLE = [
+    # (role_id, 显示名, unlock_key)
+    ('ba_jie', '猪八戒', 'role_ba_jie'),
+    ('sha_seng', '沙僧', 'role_sha_seng'),
+    ('yu_tu', '玉兔', 'role_yu_tu'),
+    ('ne_zha', '哪吒', 'role_ne_zha'),
+    ('bai_long', '白龙', 'role_bai_long'),
+]
+DEFAULT_UNLOCKED_ROLES = ['wu_kong', 'tang_seng']
+
+
+def default_userdata_dir():
+    """游戏用户数据目录（unlock_data.json 所在，saves 的上一级）"""
+    save_dir = default_save_dir()
+    if save_dir:
+        return os.path.dirname(save_dir)
+    return None
+
+
+def unlock_data_path(userdata_dir):
+    return os.path.join(userdata_dir, 'unlock_data.json')
+
+
+def read_unlock_data(userdata_dir):
+    """读取 unlock_data.json，异常/缺失时返回空结构"""
+    p = unlock_data_path(userdata_dir)
+    if not os.path.exists(p):
+        return {'unlocks': {}, 'announced_roles': []}
+    try:
+        with open(p, 'r', encoding='utf-8-sig') as f:
+            data = json.load(f)
+    except Exception:
+        return {'unlocks': {}, 'announced_roles': []}
+    if not isinstance(data, dict):
+        data = {}
+    if not isinstance(data.get('unlocks'), dict):
+        data['unlocks'] = {}
+    if not isinstance(data.get('announced_roles'), list):
+        data['announced_roles'] = []
+    return data
+
+
+def write_unlock_data(userdata_dir, data):
+    """原子写入 unlock_data.json（Godot JSON.stringify 兼容：紧凑、UTF-8、不转义中文）"""
+    p = unlock_data_path(userdata_dir)
+    tmp = p + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        f.write(godot_json(data))
+    os.replace(tmp, p)
+
+
+def get_locked_roles(data):
+    """返回当前仍未解锁的角色 [(role_id, 显示名, key), ...]"""
+    out = []
+    for rid, disp, key in ROLE_UNLOCK_TABLE:
+        if not data.get('unlocks', {}).get(key, False):
+            out.append((rid, disp, key))
+    return out
+
+
+def get_unlocked_display_names(data):
+    out = []
+    for rid, disp, key in ROLE_UNLOCK_TABLE:
+        if data.get('unlocks', {}).get(key, False):
+            out.append(disp)
+    return out
+
+
+def unlock_all_roles(userdata_dir):
+    """一键解锁所有角色（等价游戏内 UnlockSystem.unlock_all_roles()）
+    返回本次新解锁的角色显示名列表"""
+    data = read_unlock_data(userdata_dir)
+    newly = []
+    for rid, disp, key in ROLE_UNLOCK_TABLE:
+        if not data['unlocks'].get(key, False):
+            data['unlocks'][key] = True
+            newly.append(disp)
+    if newly:
+        # 写前备份
+        p = unlock_data_path(userdata_dir)
+        if os.path.exists(p):
+            try:
+                shutil.copy2(p, p + '.backup_解锁前')
+            except Exception:
+                pass
+        write_unlock_data(userdata_dir, data)
+    return newly
+
+
 # ================= GUI =================
 def main():
     try:
@@ -1377,20 +1471,42 @@ def main():
 
         ttk.Button(dlg, text='导入到原槽位', command=do_import_hist).pack(pady=4)
 
+    def _unlock_all_roles_gui():
+        """一键解锁所有角色（直接写游戏 unlock_data.json）"""
+        ud = default_userdata_dir()
+        if not ud:
+            messagebox.showerror('错误', '未找到游戏用户数据目录\n（请先运行过一次游戏，生成存档后再试）')
+            return
+        if not os.path.isdir(ud):
+            messagebox.showerror('错误', '游戏用户数据目录不存在：\n%s' % ud)
+            return
+        newly = unlock_all_roles(ud)
+        data = read_unlock_data(ud)
+        unlocked = get_unlocked_display_names(data)
+        if newly:
+            messagebox.showinfo('解锁成功', '已解锁角色：' + '、'.join(newly) +
+                                '\n\n重新进入游戏的「角色选择」界面即可选用。')
+        else:
+            messagebox.showinfo('解锁成功', '所有角色都已解锁：\n' + '、'.join(unlocked))
+        status.set('角色解锁：' + ('、'.join(unlocked) if unlocked else '（无）'))
+
     # 初始
     btn = ttk.Frame(frm)
     btn.pack(fill='x', pady=4)
     ttk.Button(btn, text='载入选中槽位', command=_on_slot_select).pack(side='left', padx=2)
     ttk.Button(btn, text='保存修改', command=_save).pack(side='left', padx=2)
+    ttk.Button(btn, text='解锁所有角色', command=_unlock_all_roles_gui).pack(side='left', padx=2)
+    ttk.Button(btn, text='装备管理…', command=_equip_manager).pack(side='left', padx=2)
     ttk.Button(btn, text='导出存档码', command=_export_code).pack(side='left', padx=2)
     ttk.Button(btn, text='导入存档码…', command=_import_code).pack(side='left', padx=2)
-    ttk.Button(btn, text='装备管理…', command=_equip_manager).pack(side='left', padx=2)
-    ttk.Button(btn, text='完整JSON编辑', command=_json_editor).pack(side='left', padx=2)
-    ttk.Button(btn, text='合规检查', command=_check_compliance).pack(side='left', padx=2)
-    ttk.Button(btn, text='复制槽位…', command=_copy_slot).pack(side='left', padx=2)
-    ttk.Button(btn, text='删除槽位', command=_delete_slot).pack(side='left', padx=2)
-    ttk.Button(btn, text='存档码历史…', command=_history_view).pack(side='left', padx=2)
-    ttk.Button(btn, text='打开存档目录', command=_open_dir).pack(side='left', padx=2)
+    btn2 = ttk.Frame(frm)
+    btn2.pack(fill='x', pady=(0, 4))
+    ttk.Button(btn2, text='完整JSON编辑', command=_json_editor).pack(side='left', padx=2)
+    ttk.Button(btn2, text='合规检查', command=_check_compliance).pack(side='left', padx=2)
+    ttk.Button(btn2, text='复制槽位…', command=_copy_slot).pack(side='left', padx=2)
+    ttk.Button(btn2, text='删除槽位', command=_delete_slot).pack(side='left', padx=2)
+    ttk.Button(btn2, text='存档码历史…', command=_history_view).pack(side='left', padx=2)
+    ttk.Button(btn2, text='打开存档目录', command=_open_dir).pack(side='left', padx=2)
     slot_list.bind('<<TreeviewSelect>>', lambda e: _on_slot_select())
     _refresh_slots()
     root.mainloop()

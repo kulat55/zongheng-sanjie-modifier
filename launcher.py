@@ -70,9 +70,9 @@ if __name__ == '__main__':
     ttk.Label(top, text='实时修改游戏内数值：金币/灵魂/生命…\n「一键无敌」：自动定位 HP，开启=锁满血，关闭=正常受伤',
               foreground='#666', justify='left').pack(fill='x', padx=6)
 
-    ttk.Button(top, text='存档编辑器（改存档 / 装备管理）',
+    ttk.Button(top, text='存档编辑器（改存档 / 装备 / 解锁角色）',
                command=launch_save).pack(fill='x', pady=(14, 6), ipady=10)
-    ttk.Label(top, text='直接改存档文件：属性/背包/装备（986件可加可穿）/导出导入存档码…',
+    ttk.Label(top, text='直接改存档文件：属性/背包/装备（986件可加可穿）/一键解锁全部角色/导出导入存档码…',
               foreground='#666', justify='left').pack(fill='x', padx=6)
 
     ttk.Button(top, text='退出', command=root.destroy).pack(fill='x', pady=(18, 0))
